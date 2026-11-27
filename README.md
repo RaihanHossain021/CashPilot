@@ -1,5 +1,4 @@
-# CashPilot
-# Small Business Financial Intelligence
+# CashPilot (Small Business Financial Intelligence)
 
 **A cash-flow copilot for small merchants.** Record sales, purchases and payments, see real cash versus money owed, get an early shortage warning with its cause, ask an AI advisor questions, and compare decisions before acting.
 
