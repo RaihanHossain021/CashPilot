@@ -45,7 +45,9 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    business: Mapped[Business | None] = relationship(back_populates="owner", uselist=False)
+    business: Mapped[Business | None] = relationship(
+        back_populates="owner", uselist=False, cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class Business(Base):
@@ -135,6 +137,13 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         Index("ix_transactions_business_date", "business_id", "date"),
+        Index(
+            "uq_transactions_business_idempotency",
+            "business_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         CheckConstraint(
             "type IN ('sale', 'purchase', 'expense', 'sale_return', 'purchase_return')",
             name="ck_transactions_type",
@@ -149,6 +158,9 @@ class Transaction(Base):
         Uuid, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False
     )
     type: Mapped[str] = mapped_column(String(24), nullable=False)
+    original_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     customer_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True
     )
@@ -162,9 +174,14 @@ class Transaction(Base):
         MONEY, nullable=False, default=Decimal("0.0000")
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="posted")
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    items: Mapped[list[TransactionItem]] = relationship(
+        cascade="all, delete-orphan", order_by="TransactionItem.id"
     )
 
 
@@ -212,7 +229,7 @@ class CashMovement(Base):
     date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     signed_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -245,7 +262,7 @@ class InventoryMovement(Base):
     )
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -275,7 +292,7 @@ class ScheduledEvent(Base):
     expected_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
     certainty: Mapped[str] = mapped_column(String(16), nullable=False)
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

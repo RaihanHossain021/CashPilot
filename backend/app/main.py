@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 import app.models  # noqa: F401 - register ORM models on Base.metadata
 from app.config import settings
 from app.db import Base, check_db_connection, engine
-from app.routers import auth, business, master_data
+from app.routers import auth, business, dev, ledger, master_data
 
 
 @asynccontextmanager
@@ -38,6 +38,8 @@ API_V1_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_V1_PREFIX)
 app.include_router(business.router, prefix=API_V1_PREFIX)
 app.include_router(master_data.router, prefix=API_V1_PREFIX)
+app.include_router(ledger.router, prefix=API_V1_PREFIX)
+app.include_router(dev.router, prefix=API_V1_PREFIX)
 
 
 @app.get("/health", tags=["system"])

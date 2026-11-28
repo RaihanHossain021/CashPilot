@@ -16,6 +16,7 @@ def _normalize_pg_url(url: str) -> str:
 class Settings(BaseSettings):
     """Application settings loaded from the project root .env file."""
 
+    environment: str = "development"
     database_url: str = "postgresql://postgres:postgres@localhost:5432/fin_intel"
     test_database_url: str = "postgresql://postgres:postgres@localhost:5432/fin_intel_test"
     jwt_secret: str = "change-me"
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def is_dev(self) -> bool:
+        return self.environment.strip().lower() in {"dev", "development", "local"}
 
 
 settings = Settings()

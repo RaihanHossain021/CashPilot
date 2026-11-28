@@ -142,6 +142,111 @@ class ProductOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 2: Ledger (Transactions, Payments, Returns, Opening Balances)
+# ---------------------------------------------------------------------------
+
+
+class TransactionItemCreate(BaseModel):
+    product_id: uuid.UUID | None = None
+    qty: Decimal = Field(gt=Decimal("0"))
+    unit_price: Decimal | None = Field(default=None, ge=Decimal("0"))
+
+
+class TransactionItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    product_id: uuid.UUID | None
+    qty: Decimal
+    unit_price: Decimal
+    unit_cost_snapshot: Decimal
+
+
+class TransactionCreate(BaseModel):
+    type: Literal["sale", "purchase", "expense", "sale_return", "purchase_return"]
+    original_transaction_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
+    date: dt.date
+    due_date: dt.date | None = None
+    discount: Decimal = Field(default=Decimal("0.0000"), ge=Decimal("0"))
+    paid_amount: Decimal = Field(default=Decimal("0.0000"), ge=Decimal("0"))
+    expense_amount: Decimal | None = Field(default=None, ge=Decimal("0"))
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+    notes: str | None = Field(default=None, max_length=2000)
+    items: list[TransactionItemCreate] = Field(default_factory=list)
+
+
+class TransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    business_id: uuid.UUID
+    type: str
+    original_transaction_id: uuid.UUID | None
+    customer_id: uuid.UUID | None
+    supplier_id: uuid.UUID | None
+    date: dt.date
+    due_date: dt.date | None
+    total: Decimal
+    discount: Decimal
+    status: str
+    idempotency_key: str | None
+    notes: str | None
+    created_at: dt.datetime
+    amount_paid: Decimal
+    returns_total: Decimal
+    balance_due: Decimal
+    items: list[TransactionItemOut]
+
+
+class PaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=Decimal("0"))
+    date: dt.date
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class CashMovementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    business_id: uuid.UUID
+    date: dt.date
+    signed_amount: Decimal
+    transaction_id: uuid.UUID | None
+    idempotency_key: str | None
+    note: str | None
+    created_at: dt.datetime
+
+
+class OpeningCashCreate(BaseModel):
+    amount: Decimal = Field(ge=Decimal("0"))
+    date: dt.date
+    note: str | None = Field(default="Opening cash", max_length=500)
+
+
+class OpeningStockCreate(BaseModel):
+    product_id: uuid.UUID
+    qty: Decimal = Field(gt=Decimal("0"))
+    unit_cost: Decimal = Field(ge=Decimal("0"))
+    note: str | None = Field(default="Opening stock", max_length=500)
+
+
+class InventoryMovementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    business_id: uuid.UUID
+    product_id: uuid.UUID
+    qty_delta: Decimal
+    unit_cost: Decimal
+    type: str
+    transaction_id: uuid.UUID | None
+    created_at: dt.datetime
+
+
+# ---------------------------------------------------------------------------
 # Frozen Response Contracts for Parallel Frontend / Later Phases
 # (Decimal fields serialize as strings in JSON.)
 # ---------------------------------------------------------------------------

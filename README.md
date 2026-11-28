@@ -107,7 +107,7 @@ Eleven tables. Every business-owned table carries `business_id`. IDs are UUIDs a
 | `customers` | business_id, name, phone |
 | `suppliers` | business_id, name, phone |
 | `products` | business_id, name, sku, kind (`goods`/`service`), unit, track_inventory, reorder_level, sale_price, avg_cost, expiry_date? |
-| `transactions` | business_id, type (`sale`/`purchase`/`expense`/`sale_return`/`purchase_return`), customer_id?, supplier_id?, date, due_date?, total, discount, status (`posted`/`void`), notes |
+| `transactions` | business_id, type (`sale`/`purchase`/`expense`/`sale_return`/`purchase_return`), original_transaction_id?, customer_id?, supplier_id?, date, due_date?, total, discount, status (`posted`/`void`), idempotency_key?, notes |
 | `transaction_items` | transaction_id, product_id?, qty, unit_price, unit_cost_snapshot |
 | `cash_movements` | business_id, date, signed_amount (+in / −out), transaction_id? (null = opening cash or manual entry), idempotency_key?, note |
 | `inventory_movements` | business_id, product_id, qty_delta, unit_cost, type (`opening`/`purchase`/`sale`/`return`/`adjust`), transaction_id? |
@@ -116,8 +116,10 @@ Eleven tables. Every business-owned table carries `business_id`. IDs are UUIDs a
 
 **Modelling rules**
 - A payment is a `cash_movement` linked to a transaction. Partial payments are several movements on one transaction.
-- Posted transactions are never edited. Corrections use a return or adjustment record.
+- Posted transactions are never edited. Corrections use a return (`original_transaction_id`) or adjustment record.
+- Forecast obligations and expected collections are derived directly from open transaction balances (`total − returns − payments`), not copied into `scheduled_events`. `scheduled_events` holds manual items only (e.g., rent, wages, planned purchases).
 - Cash comes only from `cash_movements`, and stock only from `inventory_movements`.
+- Opening receivables and payables in v1 can be entered as backdated credit transactions (known limitation: they appear in historical sales/purchases).
 - Forecasts and scenarios are computed on request, not stored.
 
 ---
@@ -145,9 +147,9 @@ For each day: `closing cash = opening cash + inflows − outflows`
 
 | Source | Examples |
 |---|---|
-| **Confirmed** | Supplier payments due, scheduled expenses |
-| **Expected** | Customer collections on or after due dates |
-| **Estimated** | Baseline daily cash sales from a 14-day moving average |
+| **Confirmed** | Open supplier payables due (derived from ledger), manual scheduled expenses (rent, wages) |
+| **Expected** | Open customer receivables on or after due dates (derived from ledger) |
+| **Estimated** | Baseline daily cash inflows (14-day moving average of cash sales) and baseline daily cash outflows (14-day moving average of cash purchases and cash expenses) |
 
 - A credit sale is never counted as cash until it is paid.
 - Days where closing cash falls below `min_cash_reserve` are flagged.
@@ -329,9 +331,9 @@ Phases 0–6 are the **must-have core**. Phases 7–9 are the **differentiators*
 
 **Phase 1: Auth and data foundation.** Create models and tables. Implement register and login with hashed passwords and JWT. Add a dependency that resolves the current user's `business_id` and use it in every query. Freeze response schemas for dashboard, forecast, readiness, and scenarios early so frontend work can run in parallel.
 
-**Phase 2: Ledger.** Implement `ledger.py`: create and post a transaction with server-side totals, create its inventory movements with cost snapshots, record payments as cash movements, handle returns, and set opening cash and stock. Add an idempotency key to payment requests.
+**Phase 2: Ledger.** Implement `ledger.py`: create and post transactions idempotently with server-side totals, create inventory movements with cost snapshots and `with_for_update` stock locking, record payments as cash movements, handle returns linked via `original_transaction_id`, and set opening cash and stock. Forecast events are derived from open balances rather than duplicated into `scheduled_events`.
 
-**Phase 3: Seed data.** Build `seed.py` using the ledger service right after Phase 2 works so it doubles as an integration test for posting, and build the grocery business (strong sales, a large supplier payment due in about nine days, uncollected credit sales, and slow stock whose flagged value can meaningfully offset the cash gap) plus a small service business.
+**Phase 3: Seed data.** Build a deterministic, date-relative `seed.py` using the ledger service right after Phase 2 works so it doubles as an integration test for posting. Size the grocery business first (strong sales, a large supplier payment due in about nine days, uncollected credit sales, and slow stock whose flagged value exceeds the cash gap); add the service business only after the grocery story passes.
 
 **Phase 4: Finance engine & readiness.** Implement `finance.py` and `readiness.py` (threshold-based green/amber/red per dimension with evidence figures, slow-stock capital flagged, `GET /readiness`). Write tests with hand-calculated expected values before moving on.
 
