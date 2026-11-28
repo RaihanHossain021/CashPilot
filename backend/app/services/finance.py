@@ -296,18 +296,10 @@ def get_data_coverage(
     history_days = ((ref_date - earliest_date).days + 1) if earliest_date is not None else 0
 
     cash_pos = get_cash_position(db, business_id, as_of=ref_date)
-    missing_due_count = (
-        db.query(func.count(Transaction.id))
-        .filter(
-            Transaction.business_id == business_id,
-            Transaction.status == "posted",
-            Transaction.type.in_(["sale", "purchase"]),
-            Transaction.date <= ref_date,
-            Transaction.due_date.is_(None),
-        )
-        .scalar()
-        or 0
+    open_credit_txs = get_open_transaction_balances(
+        db, business_id, ("sale", "purchase"), as_of=ref_date
     )
+    missing_due_count = sum(1 for tx in open_credit_txs if tx.due_date is None)
 
     return {
         "as_of": ref_date,
