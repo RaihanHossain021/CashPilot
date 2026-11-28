@@ -1,48 +1,109 @@
-import { useQuery } from '@tanstack/react-query'
-import { fetchHealth } from './api'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { ApiError, api, getStoredToken, setStoredToken } from './api'
+import { AppShell, type NavTab } from './components/AppShell'
+import { SettingsModal } from './components/SettingsModal'
+import { AuthPage } from './pages/AuthPage'
+import { DashboardPage } from './pages/Dashboard'
+import { InventoryPage } from './pages/Inventory'
+import { LedgerPage } from './pages/Ledger'
+import { PartiesPage } from './pages/Parties'
 
 function App() {
-  const { data, error, isLoading, refetch } = useQuery({
-    queryKey: ['health'],
-    queryFn: fetchHealth,
+  const queryClient = useQueryClient()
+  const [hasToken, setHasToken] = useState<boolean>(() => Boolean(getStoredToken()))
+  const [activeTab, setActiveTab] = useState<NavTab>('dashboard')
+  const [showSettings, setShowSettings] = useState(false)
+
+  const businessQuery = useQuery({
+    queryKey: ['business'],
+    queryFn: api.getBusiness,
+    enabled: hasToken,
     retry: false,
   })
 
-  return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">CashPilot</h1>
-            <p className="text-sm text-slate-500">Phase 0 Environment Check</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Recheck
-          </button>
-        </div>
+  const handleSignOut = () => {
+    setStoredToken(null)
+    setHasToken(false)
+    queryClient.clear()
+  }
 
-        <div className="mt-6 rounded-lg bg-slate-50 p-4 border border-slate-200 text-sm">
-          {isLoading ? (
-            <p className="text-slate-600">Checking backend `/health`...</p>
-          ) : error ? (
-            <div className="text-red-700">
-              <p className="font-medium">Backend / Database Unavailable</p>
-              <p className="mt-1 text-xs break-words">{error.message}</p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <p className="font-medium text-emerald-700">Backend &amp; Database Connected</p>
-              <p className="text-slate-600">Status: {data?.status}</p>
-              <p className="text-slate-600">Database: {data?.database}</p>
-            </div>
-          )}
+  if (
+    hasToken &&
+    businessQuery.isError &&
+    businessQuery.error instanceof ApiError &&
+    businessQuery.error.status === 401
+  ) {
+    handleSignOut()
+  }
+
+  const needsBusinessSetup =
+    hasToken &&
+    businessQuery.isError &&
+    businessQuery.error instanceof ApiError &&
+    businessQuery.error.status === 404
+
+  if (!hasToken || needsBusinessSetup) {
+    return (
+      <AuthPage
+        needsBusinessSetup={needsBusinessSetup}
+        onAuthenticated={() => {
+          setHasToken(true)
+          void queryClient.invalidateQueries({ queryKey: ['business'] })
+        }}
+        onBusinessCreated={(biz) => {
+          queryClient.setQueryData(['business'], biz)
+        }}
+        onSignOut={handleSignOut}
+      />
+    )
+  }
+
+  if (businessQuery.isLoading || !businessQuery.data) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6">
+        <div className="glass-panel rounded-2xl px-6 py-4 text-sm text-slate-600">
+          Loading your CashPilot workspace...
         </div>
-      </div>
-    </main>
+      </main>
+    )
+  }
+
+  const business = businessQuery.data
+
+  return (
+    <AppShell
+      business={business}
+      activeTab={activeTab}
+      onSelectTab={setActiveTab}
+      onOpenSettings={() => setShowSettings(true)}
+      onSignOut={handleSignOut}
+    >
+      {activeTab === 'dashboard' && <DashboardPage />}
+      {activeTab === 'ledger' && <LedgerPage business={business} />}
+      {activeTab === 'parties' && <PartiesPage />}
+      {activeTab === 'inventory' && <InventoryPage />}
+      {(activeTab === 'advisor' || activeTab === 'scenarios') && (
+        <section className="glass-panel cp-enter rounded-3xl p-8 text-center max-w-xl mx-auto mt-10">
+          <h1 className="text-xl font-semibold text-slate-900">
+            {activeTab === 'advisor' ? 'AI Advisor (Phase 7)' : 'Scenario Lab (Phase 8)'}
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            {activeTab === 'advisor'
+              ? 'Grounded Gemini tool-calling chat with tool-use citations is scheduled in Phase 7.'
+              : 'Interactive what-if comparisons (collect dues, delay payment, reorder less, planned purchase) are scheduled in Phase 8.'}
+          </p>
+        </section>
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          business={business}
+          onClose={() => setShowSettings(false)}
+          onUpdated={(updated) => queryClient.setQueryData(['business'], updated)}
+        />
+      )}
+    </AppShell>
   )
 }
 

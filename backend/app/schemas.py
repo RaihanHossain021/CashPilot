@@ -430,3 +430,28 @@ class ScenarioResponse(BaseModel):
     baseline: ForecastResponse
     simulated: ForecastResponse
     impact: ScenarioImpactOut
+
+
+class BusinessUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    vertical: Literal["grocery", "service", "other"] | None = None
+    currency: str | None = Field(default=None, min_length=1, max_length=12)
+    min_cash_reserve: Decimal | None = Field(default=None, ge=Decimal("0"))
+    slow_stock_days_threshold: int | None = Field(default=None, ge=1, le=365)
+
+
+class PartyBalanceOut(BaseModel):
+    id: uuid.UUID
+    kind: Literal["customer", "supplier"]
+    name: str
+    phone: str | None
+    balance_due: Decimal
+    overdue_amount: Decimal
+    earliest_due_date: dt.date | None
+
+
+class PartiesBalanceResponse(BaseModel):
+    currency: str
+    as_of: dt.date
+    customers: list[PartyBalanceOut]
+    suppliers: list[PartyBalanceOut]
