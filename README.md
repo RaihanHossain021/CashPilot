@@ -200,26 +200,22 @@ The advisor has read-only, tenant-scoped, Pydantic-validated tools:
 
 | Tool | Returns |
 |---|---|
-| `get_cash_position` | Cash on hand and reserve |
-| `get_receivables` / `get_payables` | Totals, overdue amounts, top parties |
-| `forecast_cash(days)` | Daily projection, estimated cash gap, shortage date, cause |
-| `get_slow_stock` | Slow items, stock value flagged, days of stock |
-| `get_financial_readiness` | Transparent readiness profile, evidence, and record-quality gaps |
-| `get_product_margin` | Margin by product |
-| `get_profit_summary` | Net sales, gross profit, expenses |
-| `run_scenario(type, params)` | Baseline vs. scenario projection and projected cash improvement (including `planned_purchase` affordability) |
-| `get_data_coverage` | Days of history, missing information |
+| `get_financial_snapshot` | Cash on hand, reserve, receivables/payables summaries (top 5 parties), slow stock (top 5), `trapped_internal_capital`, and data coverage |
+| `forecast_cash(days)` | Compact projection: lowest day, estimated cash gap, `gap_vs_trapped_capital`, top causes, and first 7 days |
+| `get_financial_readiness` | Transparent green/amber/red readiness profile, evidence, and record-quality gaps |
+| `get_profit_summary` / `get_product_margin` | Net sales, gross profit, expenses, and top/bottom product margins |
+| `run_scenario(type, params)` | Baseline vs. simulated projection, `projected_cash_improvement`, `trapped_internal_capital`, and affordability (`planned_purchase`) |
 
-**Response shape (JSON):** `summary`, `figures`, `evidence` (tool names and record ids), `assumptions`, `limitations`.
+**Response shape (JSON):** `summary`, `figures` (resolved from tool outputs via references), `evidence` (server-built from tool calls and returned record IDs), `assumptions`, `limitations`, `fallback_used`.
 
 **Safety rules**
-- The advisor cannot write to the ledger, and never issues a formal credit score or loan approval decision.
-- Always surface trapped internal capital (slow stock + overdue receivables) before suggesting external borrowing.
-- Merchant notes are treated as untrusted text, never as instructions.
-- Every tool call is logged to `advisor_logs`.
-- Missing data produces a qualified answer, not a guess.
+- The advisor cannot write to the ledger, refuses off-topic requests, and never issues a formal credit score or loan approval/rejection decision (for loan questions, it surfaces internal capital vs. the gap and states a lender decides eligibility).
+- On shortage, borrowing, or affordability questions, surface `trapped_internal_capital` (slow stock + overdue receivables) before suggesting external borrowing.
+- Merchant `notes` are never returned to the model; customer, supplier, and product names are truncated and treated strictly as data.
+- Tool calls are capped at 6 unique calls with automatic function calling disabled, followed by a separate structured-output call; a backend number check retries once and falls back deterministically (`fallback_used: true`) on mismatch, timeout, or missing key.
+- Every call (including failures) is logged to `advisor_logs` with tool args, duration, model, token usage, and check flags.
 
-**Example:** *"Can I afford a 15,000 purchase?"* The advisor calls `get_cash_position`, `get_payables`, `get_receivables`, `get_slow_stock` and `run_scenario("planned_purchase", ...)`, then reports whether cash covers it, the lowest projected balance and its date, whether trapped stock capital should be freed first, and whether the stock is actually needed.
+**Example:** *"Can I afford a 15,000 purchase?"* The advisor calls `get_financial_snapshot` and `run_scenario("planned_purchase", ...)`, then reports whether cash covers it, the lowest projected balance and its date, and whether trapped internal capital should be freed first.
 
 ---
 
@@ -318,8 +314,8 @@ Work is split into two parallel tracks so one to three people can build at once:
 | **4** | Finance engine (`finance.py`) and tests | 5 | B | Cash, dues, slow-stock capital, profitability, coverage, and invariants pass |
 | **5** | Forecast and cash gap (`forecast.py`) | 4 | B | 7/14/30-day forecast returns confirmed, expected, same-day estimated parts, cash gap, and cause |
 | **6** | Readiness, recommendations, and Core UI | 10 | B + F | `readiness.py`, `/dashboard`, `/readiness`, `recommend.py`, and Core UI pages work against the API |
-| **7** | AI advisor | 5 | B + F | Chat answers using tools and shows tools used |
-| **8** | Scenario Lab | 4 | B + F | Scenarios (including planned purchase affordability) compare against baseline with impact deltas |
+| **7** | AI advisor + scenario runner | 6 | B + F | `scenario.py` runner and Advisor chat answer with grounded tool citations |
+| **8** | Scenario Lab | 2–3 | B + F | `/scenarios` endpoint and interactive Scenario Lab UI compare alternatives in charts |
 | **9** | Recommendations | 2 | B + F | Rule-based actions appear on the dashboard |
 | **10** | Polish and demo rehearsal | 4 | All | The demo script runs end to end without errors |
 | **11** | Deploy (optional) | 2 | All | Public URL works |
@@ -342,9 +338,9 @@ Phases 0–6 are the **must-have core**. Phases 7–9 are the **differentiators*
 
 **Phase 6: Readiness, recommendations & Core UI.** Implement `readiness.py` (pure threshold-based green/amber/red function), `recommend.py` (internal capital first), `/dashboard`, and `/readiness`, then build the layout, navigation, Dashboard, Ledger forms, Parties, and Inventory UI.
 
-**Phase 7: AI advisor.** Wrap Gemini in `llm.py`, register the tools (including `get_financial_readiness`), implement the tool loop with limits and the number check, and build the chat UI with a tools-used panel.
+**Phase 7: AI advisor.** Build the `scenario.py` runner, wrap Gemini behind `llm.py` with separate tool-calling and structured-output steps, register consolidated read-only tools, implement the 6-call cap, normalized number check with retry/fallback, and build the Advisor chat UI with a tools-used panel.
 
-**Phase 8: Scenario Lab.** Implement the scenarios in `scenario.py` (including `planned_purchase` affordability and `projected_cash_improvement` impact deltas), expose `/scenarios`, and build the side-by-side chart.
+**Phase 8: Scenario Lab.** Expose `/scenarios` on top of `scenario.py` (supporting `collect_dues`, `delay_payment`, `reorder_less`, and `planned_purchase`) and build the interactive side-by-side Scenario Lab chart UI.
 
 **Phase 9: Recommendations.** Implement the internal-capital-first rules in `recommend.py` (highlighting slow stock and overdue dues before borrowing) and display them on the dashboard with their evidence.
 

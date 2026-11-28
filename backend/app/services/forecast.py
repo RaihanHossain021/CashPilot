@@ -45,10 +45,11 @@ class MoveOutflowOverride:
 
 @dataclass(frozen=True)
 class ReduceOutflowOverride:
-    """Reduce a payable's outflow amount by reduction_pct (0..100)."""
+    """Reduce a payable or scheduled event's outflow amount by reduction_pct (0..100)."""
 
-    transaction_id: uuid.UUID
     reduction_pct: Decimal
+    transaction_id: uuid.UUID | None = None
+    scheduled_event_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,7 @@ def build_forecast(
     inflow_moves_by_tx: dict[uuid.UUID, list[MoveInflowOverride]] = defaultdict(list)
     outflow_delays_by_tx: dict[uuid.UUID, int] = {}
     outflow_reductions_by_tx: dict[uuid.UUID, Decimal] = {}
+    outflow_reductions_by_event: dict[uuid.UUID, Decimal] = {}
     extra_outflows: list[ExtraOutflowOverride] = []
 
     for ov in overrides or []:
@@ -150,7 +152,10 @@ def build_forecast(
                 outflow_delays_by_tx.get(ov.transaction_id, 0) + ov.delay_days
             )
         elif isinstance(ov, ReduceOutflowOverride):
-            outflow_reductions_by_tx[ov.transaction_id] = ov.reduction_pct
+            if ov.transaction_id is not None:
+                outflow_reductions_by_tx[ov.transaction_id] = ov.reduction_pct
+            if ov.scheduled_event_id is not None:
+                outflow_reductions_by_event[ov.scheduled_event_id] = ov.reduction_pct
         elif isinstance(ov, ExtraOutflowOverride):
             extra_outflows.append(ov)
 
@@ -235,6 +240,9 @@ def build_forecast(
     for ev in manual_events:
         effective_date = day_1 if ev.expected_on <= ref_date else ev.expected_on
         amt = q4(Decimal(ev.amount))
+        if ev.id in outflow_reductions_by_event:
+            pct = outflow_reductions_by_event[ev.id]
+            amt = q4(amt * (Decimal("100") - pct) / Decimal("100"))
         if amt <= Decimal("0"):
             continue
         if ev.direction == "inflow":

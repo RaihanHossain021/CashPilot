@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
 from app.auth import hash_password
 from app.db import SessionLocal
-from app.models import Business, Customer, Product, Supplier, User
+from app.models import Business, Customer, Product, ScheduledEvent, Supplier, User
 from app.schemas import (
     OpeningCashCreate,
     OpeningStockCreate,
@@ -279,6 +279,20 @@ def seed_grocery_demo(db: Session, today: dt.date | None = None) -> dict[str, st
                 ],
             ),
         )
+
+    # Concrete planned reorder event so reorder_less has a real target without
+    # altering the day-9 lowest cash figure (-11,000 vs -10,500 on day 12).
+    db.add(
+        ScheduledEvent(
+            business_id=business.id,
+            direction="outflow",
+            label="Planned staple reorder",
+            amount=Decimal("2500.0000"),
+            expected_on=ref_today + dt.timedelta(days=12),
+            certainty="expected",
+            status="active",
+        )
+    )
 
     db.flush()
     return {

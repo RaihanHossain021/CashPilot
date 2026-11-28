@@ -263,3 +263,37 @@ export interface SeedDemoResponse {
   demo_password: string;
   reference_date: string;
 }
+
+export interface AdvisorFigureOut {
+  label: string;
+  value: string;
+  unit: string;
+  tool: string;
+  field: string;
+}
+
+export interface AdvisorToolCallOut {
+  tool: string;
+  args: Record<string, unknown>;
+  summary: string;
+}
+
+export interface AdvisorAskResponse {
+  summary: string;
+  figures: AdvisorFigureOut[];
+  evidence: string[];
+  assumptions: string[];
+  limitations: string[];
+  tools_called: AdvisorToolCallOut[];
+  number_check_passed: boolean;
+  fallback_used: boolean;
+  log_id: string;
+}
+
+export interface AdvisorLogOut {
+  id: string;
+  question: string;
+  answer: string;
+  tools_called: Array<Record<string, unknown>>;
+  created_at: string;
+}
