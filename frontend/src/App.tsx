@@ -4,6 +4,7 @@ import { ApiError, api, getStoredToken, setStoredToken } from './api'
 import { AppShell, type NavTab } from './components/AppShell'
 import { SettingsModal } from './components/SettingsModal'
 import { AuthPage } from './pages/AuthPage'
+import { AdvisorPage } from './pages/Advisor'
 import { DashboardPage } from './pages/Dashboard'
 import { InventoryPage } from './pages/Inventory'
 import { LedgerPage } from './pages/Ledger'
@@ -83,15 +84,13 @@ function App() {
       {activeTab === 'ledger' && <LedgerPage business={business} />}
       {activeTab === 'parties' && <PartiesPage />}
       {activeTab === 'inventory' && <InventoryPage />}
-      {(activeTab === 'advisor' || activeTab === 'scenarios') && (
+      {activeTab === 'advisor' && <AdvisorPage business={business} />}
+      {activeTab === 'scenarios' && (
         <section className="glass-panel cp-enter rounded-3xl p-8 text-center max-w-xl mx-auto mt-10">
-          <h1 className="text-xl font-semibold text-slate-900">
-            {activeTab === 'advisor' ? 'AI Advisor (Phase 7)' : 'Scenario Lab (Phase 8)'}
-          </h1>
+          <h1 className="text-xl font-semibold text-slate-900">Scenario Lab (Phase 8)</h1>
           <p className="mt-2 text-sm text-slate-600">
-            {activeTab === 'advisor'
-              ? 'Grounded Gemini tool-calling chat with tool-use citations is scheduled in Phase 7.'
-              : 'Interactive what-if comparisons (collect dues, delay payment, reorder less, planned purchase) are scheduled in Phase 8.'}
+            Interactive what-if comparisons (collect dues, delay payment, reorder less, planned
+            purchase) are scheduled in Phase 8.
           </p>
         </section>
       )}

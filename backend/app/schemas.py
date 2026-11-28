@@ -410,6 +410,7 @@ class ScenarioRequest(BaseModel):
     collect_pct: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("100"))
     delay_days: int | None = Field(default=None, ge=1, le=60)
     transaction_id: uuid.UUID | None = None
+    scheduled_event_id: uuid.UUID | None = None
     reorder_reduction_pct: Decimal | None = Field(
         default=None, ge=Decimal("0"), le=Decimal("100")
     )
@@ -421,6 +422,7 @@ class ScenarioImpactOut(BaseModel):
     projected_cash_improvement: Decimal
     gap_reduction_vs_reserve: Decimal
     reserve_breach_days_avoided: int
+    trapped_internal_capital: Decimal
     affordable_above_reserve: bool | None = None
 
 
@@ -430,6 +432,59 @@ class ScenarioResponse(BaseModel):
     baseline: ForecastResponse
     simulated: ForecastResponse
     impact: ScenarioImpactOut
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: AI Advisor
+# ---------------------------------------------------------------------------
+
+
+class AdvisorAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+
+    @field_validator("question")
+    @classmethod
+    def strip_question(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Question cannot be blank")
+        return cleaned
+
+
+class AdvisorFigureOut(BaseModel):
+    label: str
+    value: Decimal
+    unit: str
+    tool: str
+    field: str
+
+
+class AdvisorToolCallOut(BaseModel):
+    tool: str
+    args: dict[str, object]
+    summary: str
+
+
+class AdvisorAskResponse(BaseModel):
+    summary: str
+    figures: list[AdvisorFigureOut]
+    evidence: list[str]
+    assumptions: list[str]
+    limitations: list[str]
+    tools_called: list[AdvisorToolCallOut]
+    number_check_passed: bool
+    fallback_used: bool
+    log_id: uuid.UUID
+
+
+class AdvisorLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    question: str
+    answer: str
+    tools_called: list[dict[str, object]]
+    created_at: dt.datetime
 
 
 class BusinessUpdate(BaseModel):

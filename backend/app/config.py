@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 48
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    advisor_timeout_seconds: int = 25
+    advisor_rate_limit_per_min: int = 10
     cors_origins: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(

@@ -1,4 +1,6 @@
 import type {
+  AdvisorAskResponse,
+  AdvisorLogOut,
   BusinessCreatePayload,
   BusinessOut,
   BusinessUpdatePayload,
@@ -206,5 +208,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+  askAdvisor(question: string): Promise<AdvisorAskResponse> {
+    return request<AdvisorAskResponse>('/api/v1/advisor/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    })
+  },
+  getAdvisorHistory(): Promise<AdvisorLogOut[]> {
+    return request<AdvisorLogOut[]>('/api/v1/advisor/history')
   },
 }
