@@ -132,7 +132,7 @@ def test_scenario_runner_on_seeded_grocery(db_session: Session) -> None:
         as_of=AS_OF,
     )
     assert sc_collect.simulated.estimated_cash_gap_vs_reserve == Decimal("0.0000")
-    assert sc_collect.impact.projected_cash_improvement == Decimal("40000.0000")
+    assert sc_collect.impact.cash_impact == Decimal("40000.0000")
 
 
 def test_advisor_retry_fallback_malformed_timeout_and_cap(db_session: Session) -> None:

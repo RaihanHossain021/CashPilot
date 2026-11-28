@@ -180,7 +180,57 @@ export interface ReadinessResponse {
   dimensions: ReadinessDimensionOut[];
 }
 
+export interface ScenarioRequestPayload {
+  type: 'collect_dues' | 'delay_payment' | 'reorder_less' | 'planned_purchase';
+  horizon_days: 7 | 14 | 30;
+  collect_pct?: string | null;
+  delay_days?: number | null;
+  transaction_id?: string | null;
+  scheduled_event_id?: string | null;
+  reorder_reduction_pct?: string | null;
+  planned_purchase_amount?: string | null;
+  planned_purchase_date?: string | null;
+}
+
+export interface ScenarioImpactOut {
+  cash_impact: string;
+  gap_reduction_vs_reserve: string;
+  breach_days_change: number;
+  trapped_internal_capital: string;
+  moved_beyond_horizon: boolean;
+  affordable_above_reserve: boolean | null;
+  assumption_note: string;
+  affordability_note: string | null;
+}
+
+export interface ScenarioResponse {
+  currency: string;
+  scenario_type: string;
+  baseline: ForecastResponse;
+  simulated: ForecastResponse;
+  impact: ScenarioImpactOut;
+}
+
+export interface ScenarioOptionItemOut {
+  id: string;
+  kind: 'receivable' | 'payable' | 'scheduled_reorder';
+  label: string;
+  party_name: string;
+  amount: string;
+  due_on: string | null;
+}
+
+export interface ScenarioOptionsResponse {
+  currency: string;
+  as_of: string;
+  receivables: ScenarioOptionItemOut[];
+  payables: ScenarioOptionItemOut[];
+  reorders: ScenarioOptionItemOut[];
+}
+
 export interface RecommendationOut {
+  id: string;
+  priority: number;
   code: string;
   title: string;
   issue: string;
@@ -188,6 +238,7 @@ export interface RecommendationOut {
   suggested_action: string;
   estimated_impact: string;
   limitations: string;
+  suggested_scenario: ScenarioRequestPayload | null;
 }
 
 export interface DashboardResponse {

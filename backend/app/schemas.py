@@ -9,7 +9,7 @@ import uuid
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -375,14 +375,7 @@ class ReadinessResponse(BaseModel):
     dimensions: list[ReadinessDimensionOut]
 
 
-class RecommendationOut(BaseModel):
-    code: str
-    title: str
-    issue: str
-    evidence: str
-    suggested_action: str
-    estimated_impact: str
-    limitations: str
+# RecommendationOut & ScenarioRequest are defined in the Scenario / Recommendation section below.
 
 
 class DashboardResponse(BaseModel):
@@ -407,23 +400,32 @@ class DashboardResponse(BaseModel):
 class ScenarioRequest(BaseModel):
     type: Literal["collect_dues", "delay_payment", "reorder_less", "planned_purchase"]
     horizon_days: Literal[7, 14, 30] = 14
-    collect_pct: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("100"))
-    delay_days: int | None = Field(default=None, ge=1, le=60)
+    collect_pct: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("100"))
+    delay_days: int | None = Field(default=None, ge=1, le=30)
     transaction_id: uuid.UUID | None = None
     scheduled_event_id: uuid.UUID | None = None
     reorder_reduction_pct: Decimal | None = Field(
-        default=None, ge=Decimal("0"), le=Decimal("100")
+        default=None, gt=Decimal("0"), le=Decimal("100")
     )
     planned_purchase_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
     planned_purchase_date: dt.date | None = None
 
+    @model_validator(mode="after")
+    def validate_delay_within_horizon(self) -> ScenarioRequest:
+        if self.delay_days is not None and self.delay_days > self.horizon_days:
+            raise ValueError(f"delay_days ({self.delay_days}) must be <= horizon_days ({self.horizon_days})")
+        return self
+
 
 class ScenarioImpactOut(BaseModel):
-    projected_cash_improvement: Decimal
+    cash_impact: Decimal
     gap_reduction_vs_reserve: Decimal
-    reserve_breach_days_avoided: int
+    breach_days_change: int
     trapped_internal_capital: Decimal
+    moved_beyond_horizon: bool = False
     affordable_above_reserve: bool | None = None
+    assumption_note: str
+    affordability_note: str | None = None
 
 
 class ScenarioResponse(BaseModel):
@@ -432,6 +434,44 @@ class ScenarioResponse(BaseModel):
     baseline: ForecastResponse
     simulated: ForecastResponse
     impact: ScenarioImpactOut
+
+
+class ScenarioOptionItemOut(BaseModel):
+    id: uuid.UUID
+    kind: Literal["receivable", "payable", "scheduled_reorder"]
+    label: str
+    party_name: str
+    amount: Decimal
+    due_on: dt.date | None
+
+
+class ScenarioOptionsResponse(BaseModel):
+    currency: str
+    as_of: dt.date
+    receivables: list[ScenarioOptionItemOut]
+    payables: list[ScenarioOptionItemOut]
+    reorders: list[ScenarioOptionItemOut]
+
+
+class RecommendationOut(BaseModel):
+    id: str
+    priority: int
+    code: str
+    title: str
+    issue: str
+    evidence: str
+    suggested_action: str
+    estimated_impact: str
+    limitations: str
+    suggested_scenario: ScenarioRequest | None = None
+
+
+class RecommendationsResponse(BaseModel):
+    currency: str
+    as_of: dt.date
+    incomplete_data: bool
+    limited_data: bool
+    recommendations: list[RecommendationOut]
 
 
 # ---------------------------------------------------------------------------
