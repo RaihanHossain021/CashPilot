@@ -220,6 +220,10 @@ class CashMovement(Base):
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
+        CheckConstraint(
+            "kind IN ('opening', 'payment', 'refund', 'manual')",
+            name="ck_cash_movements_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -228,6 +232,7 @@ class CashMovement(Base):
     )
     date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     signed_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="payment")
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -242,6 +247,7 @@ class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
     __table_args__ = (
         Index("ix_inventory_movements_business_product", "business_id", "product_id"),
+        Index("ix_inventory_movements_business_date", "business_id", "date"),
         CheckConstraint("unit_cost >= 0", name="ck_inventory_movements_unit_cost_nonneg"),
         CheckConstraint(
             "type IN ('opening', 'purchase', 'sale', 'return', 'adjust')",
@@ -256,6 +262,7 @@ class InventoryMovement(Base):
     product_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
     )
+    date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     qty_delta: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(
         MONEY, nullable=False, default=Decimal("0.0000")
@@ -280,6 +287,10 @@ class ScheduledEvent(Base):
         CheckConstraint(
             "certainty IN ('confirmed', 'expected')", name="ck_scheduled_events_certainty"
         ),
+        CheckConstraint(
+            "status IN ('active', 'completed', 'cancelled')",
+            name="ck_scheduled_events_status",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -291,6 +302,7 @@ class ScheduledEvent(Base):
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     expected_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
     certainty: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True
     )

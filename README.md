@@ -109,9 +109,9 @@ Eleven tables. Every business-owned table carries `business_id`. IDs are UUIDs a
 | `products` | business_id, name, sku, kind (`goods`/`service`), unit, track_inventory, reorder_level, sale_price, avg_cost, expiry_date? |
 | `transactions` | business_id, type (`sale`/`purchase`/`expense`/`sale_return`/`purchase_return`), original_transaction_id?, customer_id?, supplier_id?, date, due_date?, total, discount, status (`posted`/`void`), idempotency_key?, notes |
 | `transaction_items` | transaction_id, product_id?, qty, unit_price, unit_cost_snapshot |
-| `cash_movements` | business_id, date, signed_amount (+in / −out), transaction_id? (null = opening cash or manual entry), idempotency_key?, note |
-| `inventory_movements` | business_id, product_id, qty_delta, unit_cost, type (`opening`/`purchase`/`sale`/`return`/`adjust`), transaction_id? |
-| `scheduled_events` | business_id, direction, label, amount, expected_on, certainty (`confirmed`/`expected`), transaction_id? |
+| `cash_movements` | business_id, date, signed_amount (+in / −out), kind (`opening`/`payment`/`refund`/`manual`), transaction_id? (null = opening cash or manual entry), idempotency_key?, note |
+| `inventory_movements` | business_id, product_id, date, qty_delta, unit_cost, type (`opening`/`purchase`/`sale`/`return`/`adjust`), transaction_id? |
+| `scheduled_events` | business_id, direction, label, amount, expected_on, certainty (`confirmed`/`expected`), status (`active`/`completed`/`cancelled`), transaction_id? |
 | `advisor_logs` | business_id, user_id, question, answer, tools_called (JSON), created_at |
 
 **Modelling rules**
@@ -147,16 +147,17 @@ For each day: `closing cash = opening cash + inflows − outflows`
 
 | Source | Examples |
 |---|---|
-| **Confirmed** | Open supplier payables due (derived from ledger), manual scheduled expenses (rent, wages) |
-| **Expected** | Open customer receivables on or after due dates (derived from ledger) |
-| **Estimated** | Baseline daily cash inflows (14-day moving average of cash sales) and baseline daily cash outflows (14-day moving average of cash purchases and cash expenses) |
+| **Confirmed** | Open supplier payables due (derived from ledger; overdue payables `due_date <= as_of` land on day 1), active manual scheduled expenses (rent, wages) |
+| **Expected** | Open customer receivables with `due_date > as_of` (derived from ledger; overdue receivables `due_date <= as_of` stay out of baseline inflows) |
+| **Estimated** | Baseline daily cash inflows (14-day moving average of **same-day** cash sales) and baseline daily cash outflows (14-day moving average of **same-day** cash purchases, expenses, and refunds) — excluding opening cash and later settlements of prior credit transactions |
 
 - A credit sale is never counted as cash until it is paid.
+- Overdue means `due_date <= as_of`. Overdue payables land conservatively on day 1, while overdue receivables are excluded from baseline inflows and surfaced as gap causes/scenarios.
 - Days where closing cash falls below `min_cash_reserve` are flagged.
 - **Estimated cash gap:** `max(0, min_cash_reserve − min_projected_cash)` (gap vs. reserve) and `max(0, −min_projected_cash)` (gap vs. zero), returned with `lowest_cash_date`, `lowest_cash_amount`, and `gap_window`.
 - With fewer than 14 days of history, the forecast is labelled **limited data**.
 - Each day is returned split by source so the UI can colour confirmed, expected, and estimated amounts differently.
-- **Cash gap cause:** the largest outflows and missing inflows leading up to the first shortage date.
+- **Cash gap cause:** the largest outflows and overdue/missing inflows leading up to the first shortage date. Slow-stock capital is surfaced separately as **unlockable capital** (a mitigation), not a cause of the gap.
 
 ### Scenarios & measurable impact
 
@@ -314,9 +315,9 @@ Work is split into two parallel tracks so one to three people can build at once:
 | **1** | Auth and data foundation | 3 | B | Register, login, create business, `business_id` filter works; response schemas frozen |
 | **2** | Ledger | 5 | B | Sale, purchase, expense, partial payment, return, and opening balances post correctly |
 | **3** | Seed data | 2 | B | `seed.py` populates the demo businesses via the ledger service and validates posting |
-| **4** | Finance engine, readiness, and tests | 7–8 | B | Cash, dues, slow-stock capital, readiness (green/amber/red), and margin tests pass |
-| **5** | Forecast and cash gap | 4 | B | 7/14/30-day forecast returns confirmed, expected, estimated parts, cash gap, and cause |
-| **6** | Core UI | 8 | F | Dashboard, Ledger, Parties, Inventory pages work against the API |
+| **4** | Finance engine (`finance.py`) and tests | 5 | B | Cash, dues, slow-stock capital, profitability, coverage, and invariants pass |
+| **5** | Forecast and cash gap (`forecast.py`) | 4 | B | 7/14/30-day forecast returns confirmed, expected, same-day estimated parts, cash gap, and cause |
+| **6** | Readiness, recommendations, and Core UI | 10 | B + F | `readiness.py`, `/dashboard`, `/readiness`, `recommend.py`, and Core UI pages work against the API |
 | **7** | AI advisor | 5 | B + F | Chat answers using tools and shows tools used |
 | **8** | Scenario Lab | 4 | B + F | Scenarios (including planned purchase affordability) compare against baseline with impact deltas |
 | **9** | Recommendations | 2 | B + F | Rule-based actions appear on the dashboard |
@@ -335,11 +336,11 @@ Phases 0–6 are the **must-have core**. Phases 7–9 are the **differentiators*
 
 **Phase 3: Seed data.** Build a deterministic, date-relative `seed.py` using the ledger service right after Phase 2 works so it doubles as an integration test for posting. Size the grocery business first (strong sales, a large supplier payment due in about nine days, uncollected credit sales, and slow stock whose flagged value exceeds the cash gap); add the service business only after the grocery story passes.
 
-**Phase 4: Finance engine & readiness.** Implement `finance.py` and `readiness.py` (threshold-based green/amber/red per dimension with evidence figures, slow-stock capital flagged, `GET /readiness`). Write tests with hand-calculated expected values before moving on.
+**Phase 4: Finance engine.** Implement `finance.py` from the rules in section 6 (cash, receivables, payables, slow-stock capital flagged, profitability, and data coverage with consistent `as_of` filtering). Write tests with hand-calculated expected values before moving on.
 
-**Phase 5: Forecast & cash gap.** Implement `forecast.py`: baseline moving average, scheduled events, reserve breach detection, estimated cash gap (`vs_reserve` and `vs_zero`), shortage cause, and the limited-data label.
+**Phase 5: Forecast & cash gap.** Implement `forecast.py`: same-day 14-day moving averages, derived open balances (overdue payables on day 1, overdue receivables excluded), active manual scheduled events, 30-day simulation sliced for 7/14/30, estimated cash gap (`vs_reserve` and `vs_zero`), shortage cause, unlockable capital, and the limited-data label.
 
-**Phase 6: Core UI.** Build the layout and navigation, then the Dashboard (KPI cards, estimated cash gap, slow-stock value flagged, financial-readiness profile, forecast chart, alert), Ledger forms, Parties, and Inventory.
+**Phase 6: Readiness, recommendations & Core UI.** Implement `readiness.py` (pure threshold-based green/amber/red function), `recommend.py` (internal capital first), `/dashboard`, and `/readiness`, then build the layout, navigation, Dashboard, Ledger forms, Parties, and Inventory UI.
 
 **Phase 7: AI advisor.** Wrap Gemini in `llm.py`, register the tools (including `get_financial_readiness`), implement the tool loop with limits and the number check, and build the chat UI with a tools-used panel.
 

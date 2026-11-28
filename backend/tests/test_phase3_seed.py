@@ -86,7 +86,7 @@ def test_seed_grocery_demo_exact_numbers_and_idempotency(
     assert stock_by_sku == {
         "RICE-5KG": Decimal("125.0000"),
         "OIL-2L": Decimal("181.0000"),
-        "SUGAR-1KG": Decimal("94.0000"),
+        "SUGAR-1KG": Decimal("34.0000"),
         "OLIVE-TIN": Decimal("10.0000"),
         "SAFFRON-BOX": Decimal("10.0000"),
     }
@@ -122,7 +122,25 @@ def test_seed_does_not_wipe_existing_merchant(client: TestClient, db_session: Se
     assert fetched.json()["id"] == biz["id"]
 
 
-@pytest.mark.skip(reason="Enable in Phase 5 once forecast.py is implemented")
-def test_seeded_grocery_forecast_shows_cash_gap_in_7_to_14_days() -> None:
-    """Contract test: seeded grocery business must project a cash gap on today + 9."""
-    raise NotImplementedError
+def test_seeded_grocery_forecast_shows_cash_gap_in_7_to_14_days(
+    client: TestClient,
+) -> None:
+    """Contract test: seeded grocery business projects a cash gap on today + 9."""
+    client.post(f"/api/v1/dev/seed?today={FIXED_TODAY.isoformat()}")
+    token = client.post(
+        "/api/v1/auth/login",
+        json={"email": GROCERY_DEMO_EMAIL, "password": GROCERY_DEMO_PASSWORD},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res_14 = client.get(f"/api/v1/cashflow/forecast?days=14&as_of={FIXED_TODAY.isoformat()}", headers=headers)
+    assert res_14.status_code == 200
+    f14 = res_14.json()
+    assert f14["lowest_cash_date"] == (FIXED_TODAY + dt.timedelta(days=9)).isoformat()
+    assert f14["lowest_cash_amount"] == "-11000.0000"
+    assert f14["estimated_cash_gap_vs_zero"] == "11000.0000"
+    assert f14["estimated_cash_gap_vs_reserve"] == "26000.0000"
+    assert f14["unlockable_slow_stock_value"] == "35000.0000"
+    # Net operating cash before day 9 and after day 9 is +1,000/day
+    day_1 = f14["daily"][0]
+    assert Decimal(day_1["estimated_inflows"]) - Decimal(day_1["estimated_outflows"]) == Decimal("1000.0000")

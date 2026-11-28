@@ -214,6 +214,7 @@ class CashMovementOut(BaseModel):
     business_id: uuid.UUID
     date: dt.date
     signed_amount: Decimal
+    kind: str
     transaction_id: uuid.UUID | None
     idempotency_key: str | None
     note: str | None
@@ -230,6 +231,7 @@ class OpeningStockCreate(BaseModel):
     product_id: uuid.UUID
     qty: Decimal = Field(gt=Decimal("0"))
     unit_cost: Decimal = Field(ge=Decimal("0"))
+    date: dt.date | None = None
     note: str | None = Field(default="Opening stock", max_length=500)
 
 
@@ -239,11 +241,74 @@ class InventoryMovementOut(BaseModel):
     id: uuid.UUID
     business_id: uuid.UUID
     product_id: uuid.UUID
+    date: dt.date
     qty_delta: Decimal
     unit_cost: Decimal
     type: str
     transaction_id: uuid.UUID | None
     created_at: dt.datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Finance Engine Reports (Inventory, Profitability, Coverage)
+# ---------------------------------------------------------------------------
+
+
+class InventoryItemOut(BaseModel):
+    product_id: uuid.UUID
+    name: str
+    sku: str
+    unit: str
+    track_inventory: bool
+    on_hand_qty: Decimal
+    avg_cost: Decimal
+    stock_value: Decimal
+    sale_price: Decimal
+    reorder_level: Decimal
+    units_sold_window: Decimal
+    daily_velocity: Decimal
+    days_of_stock: Decimal | None
+    slow_stock: bool
+    low_stock: bool
+    first_received_date: dt.date | None
+
+
+class InventoryResponse(BaseModel):
+    currency: str
+    as_of: dt.date
+    velocity_window_days: int
+    slow_stock_days_threshold: int
+    total_stock_value: Decimal
+    slow_stock_value_flagged: Decimal
+    slow_stock_pct_of_inventory: Decimal
+    items: list[InventoryItemOut]
+
+
+class ProductMarginOut(BaseModel):
+    product_id: uuid.UUID
+    name: str
+    sku: str
+    qty_sold: Decimal
+    net_sales: Decimal
+    cogs: Decimal
+    gross_profit: Decimal
+    gross_margin_pct: Decimal
+
+
+class ProfitabilityResponse(BaseModel):
+    currency: str
+    as_of: dt.date
+    period_days: int
+    gross_sales: Decimal
+    discounts: Decimal
+    returns: Decimal
+    net_sales: Decimal
+    cogs: Decimal
+    gross_profit: Decimal
+    gross_margin_pct: Decimal
+    expenses: Decimal
+    net_operating_profit: Decimal
+    products: list[ProductMarginOut]
 
 
 # ---------------------------------------------------------------------------
@@ -260,12 +325,13 @@ class ForecastDayOut(BaseModel):
     estimated_inflows: Decimal
     confirmed_outflows: Decimal
     expected_outflows: Decimal
+    estimated_outflows: Decimal
     closing_cash: Decimal
     below_reserve: bool
 
 
 class CashGapCauseOut(BaseModel):
-    kind: Literal["outflow", "overdue_receivable", "slow_stock"]
+    kind: Literal["outflow", "overdue_receivable"]
     label: str
     amount: Decimal
     due_on: dt.date | None = None
@@ -274,6 +340,7 @@ class CashGapCauseOut(BaseModel):
 
 class ForecastResponse(BaseModel):
     currency: str
+    as_of: dt.date
     horizon_days: Literal[7, 14, 30]
     limited_data: bool
     history_days: int
@@ -283,6 +350,8 @@ class ForecastResponse(BaseModel):
     estimated_cash_gap_vs_reserve: Decimal
     estimated_cash_gap_vs_zero: Decimal
     gap_start_date: dt.date | None = None
+    unlockable_slow_stock_value: Decimal
+    assumptions_note: str
     causes: list[CashGapCauseOut]
     daily: list[ForecastDayOut]
 
