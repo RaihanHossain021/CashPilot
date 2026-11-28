@@ -12,6 +12,9 @@ import type {
   ProductCreatePayload,
   ProductOut,
   ReadinessResponse,
+  ScenarioOptionsResponse,
+  ScenarioRequestPayload,
+  ScenarioResponse,
   SeedDemoResponse,
   SupplierOut,
   TokenResponse,
@@ -217,5 +220,14 @@ export const api = {
   },
   getAdvisorHistory(): Promise<AdvisorLogOut[]> {
     return request<AdvisorLogOut[]>('/api/v1/advisor/history')
+  },
+  getScenarioOptions(): Promise<ScenarioOptionsResponse> {
+    return request<ScenarioOptionsResponse>('/api/v1/scenarios/options')
+  },
+  runScenario(payload: ScenarioRequestPayload): Promise<ScenarioResponse> {
+    return request<ScenarioResponse>('/api/v1/scenarios', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   },
 }

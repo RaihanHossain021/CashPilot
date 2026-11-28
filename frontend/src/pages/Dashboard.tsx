@@ -12,6 +12,11 @@ import {
   YAxis,
 } from 'recharts'
 import { api, formatMoney } from '../api'
+import type { ScenarioRequestPayload } from '../types'
+
+interface DashboardPageProps {
+  onOpenScenario?: (scenario: ScenarioRequestPayload) => void
+}
 
 const STATUS_BADGE: Record<'green' | 'amber' | 'red', string> = {
   green: 'bg-emerald-500/15 text-emerald-800 border-emerald-500/30',
@@ -25,7 +30,7 @@ const STATUS_DOT: Record<'green' | 'amber' | 'red', string> = {
   red: 'bg-red-600',
 }
 
-export function DashboardPage() {
+export function DashboardPage({ onOpenScenario }: DashboardPageProps) {
   const [chartDays, setChartDays] = useState<7 | 14 | 30>(14)
 
   const dashboardQuery = useQuery({
@@ -428,18 +433,24 @@ export function DashboardPage() {
       </section>
 
       {/* Internal-Capital-First Recommendations */}
-      {d.recommendations.length > 0 && (
-        <section className="glass-panel rounded-3xl p-6">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Recommended Actions (Internal Capital First)
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Rule-based actions prioritized to close cash gaps using existing dues, stock, and timing
-          </p>
+      <section className="glass-panel rounded-3xl p-6">
+        <h2 className="text-lg font-semibold text-slate-900">
+          Recommended Actions (Internal Capital First)
+        </h2>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Rule-based actions prioritized to close cash gaps using existing dues, stock, and timing
+        </p>
+
+        {d.recommendations.length === 0 ? (
+          <div className="mt-4 rounded-2xl glass-panel-soft p-5 text-sm text-emerald-800">
+            No urgent cash-gap action needed — projected cash stays above your reserve across the
+            next 14 days.
+          </div>
+        ) : (
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
             {d.recommendations.map((rec) => (
               <article
-                key={rec.code}
+                key={rec.id}
                 className="glass-panel-soft cp-card-lift rounded-2xl p-4 flex flex-col justify-between"
               >
                 <div>
@@ -448,15 +459,26 @@ export function DashboardPage() {
                   <p className="mt-1.5 text-xs text-slate-500">{rec.evidence}</p>
                   <p className="mt-2 text-xs font-medium text-slate-800">{rec.suggested_action}</p>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-900/8 space-y-1">
-                  <p className="text-xs font-semibold text-[#0d7480]">{rec.estimated_impact}</p>
-                  <p className="text-[11px] text-slate-500">Limit: {rec.limitations}</p>
+                <div className="mt-3 pt-2.5 border-t border-slate-900/8 space-y-2">
+                  <div>
+                    <p className="text-xs font-semibold text-[#0d7480]">{rec.estimated_impact}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Limit: {rec.limitations}</p>
+                  </div>
+                  {rec.suggested_scenario && onOpenScenario && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenScenario(rec.suggested_scenario!)}
+                      className="cp-btn w-full py-2 px-3 rounded-xl bg-[#0d7480]/10 text-[#0d7480] text-xs font-semibold hover:bg-[#0d7480] hover:text-white"
+                    >
+                      Test in Scenario Lab →
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   )
 }

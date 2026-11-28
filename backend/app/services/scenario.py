@@ -1,4 +1,4 @@
-"""Deterministic scenario runner built on top of forecast.build_forecast."""
+"""Deterministic, strictly read-only scenario runner built on forecast.build_forecast."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models import ScheduledEvent
+from app.models import ScheduledEvent, Transaction
 from app.schemas import ScenarioImpactOut, ScenarioRequest, ScenarioResponse
 from app.services import finance, forecast
 from app.services.finance import ZERO, q4
@@ -20,6 +20,31 @@ from app.services.forecast import (
     MoveOutflowOverride,
     ReduceOutflowOverride,
 )
+
+
+def _check_tx_target(
+    db: Session,
+    business_id: uuid.UUID,
+    tx_id: uuid.UUID,
+    allowed_types: tuple[str, ...],
+    expected_label: str,
+) -> Transaction:
+    tx = (
+        db.query(Transaction)
+        .filter(Transaction.id == tx_id, Transaction.business_id == business_id)
+        .first()
+    )
+    if tx is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target transaction not found in this business",
+        )
+    if tx.status != "posted" or tx.type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Target transaction must be a posted {expected_label} (got '{tx.type}')",
+        )
+    return tx
 
 
 def run_scenario(
@@ -40,6 +65,9 @@ def run_scenario(
     )
 
     overrides: list[ForecastOverride] = []
+    moved_beyond_horizon = False
+    assumption_note = "Simulated projection."
+    affordability_note: str | None = None
 
     if req.type == "collect_dues":
         pct = req.collect_pct if req.collect_pct is not None else Decimal("50")
@@ -50,13 +78,20 @@ def run_scenario(
             if tx.overdue
         ]
         if req.transaction_id is not None:
+            _check_tx_target(db, business_id, req.transaction_id, ("sale",), "sale")
             matched = [tx for tx in overdue_sales if tx.transaction_id == req.transaction_id]
             if not matched:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Target overdue receivable not found in this business",
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Target sale has no overdue balance due",
                 )
             overdue_sales = matched
+        elif not overdue_sales:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="No overdue customer dues available to collect",
+            )
+
         for tx in overdue_sales:
             amt = q4(tx.balance_due * pct / Decimal("100"))
             if amt > ZERO:
@@ -67,17 +102,21 @@ def run_scenario(
                         amount=amt,
                     )
                 )
+        assumption_note = f"Simulated: assumes customers pay {pct}% of overdue dues by {collect_on}."
 
     elif req.type == "delay_payment":
         delay_days = req.delay_days if req.delay_days is not None else 7
         payables = finance.get_payables(db, business_id, as_of=ref_date)
         open_payables = list(payables["open_transactions"])  # type: ignore[arg-defined]
         if req.transaction_id is not None:
+            _check_tx_target(
+                db, business_id, req.transaction_id, ("purchase", "expense"), "purchase or expense"
+            )
             matched = [tx for tx in open_payables if tx.transaction_id == req.transaction_id]
             if not matched:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Target payable transaction not found in this business",
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Target payable is already fully settled",
                 )
             target_tx = matched[0]
         else:
@@ -89,15 +128,25 @@ def run_scenario(
             candidates = in_horizon or open_payables
             if not candidates:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No open supplier payable found to delay",
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="No open supplier payable available to delay",
                 )
             target_tx = max(candidates, key=lambda t: t.balance_due)
+
+        base_due = target_tx.due_date if target_tx.due_date is not None else (ref_date + dt.timedelta(days=1))
+        shifted_due = base_due + dt.timedelta(days=delay_days)
+        if shifted_due > horizon_end:
+            moved_beyond_horizon = True
+
         overrides.append(
             MoveOutflowOverride(
                 transaction_id=target_tx.transaction_id,
                 delay_days=delay_days,
             )
+        )
+        assumption_note = (
+            f"Simulated: assumes supplier agrees to defer payment by {delay_days} days."
+            + (" Payment moves outside this period." if moved_beyond_horizon else "")
         )
 
     elif req.type == "reorder_less":
@@ -108,8 +157,6 @@ def run_scenario(
                 .filter(
                     ScheduledEvent.id == req.scheduled_event_id,
                     ScheduledEvent.business_id == business_id,
-                    ScheduledEvent.status == "active",
-                    ScheduledEvent.direction == "outflow",
                 )
                 .first()
             )
@@ -118,10 +165,14 @@ def run_scenario(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Planned reorder event not found in this business",
                 )
-            overrides.append(
-                ReduceOutflowOverride(scheduled_event_id=ev.id, reduction_pct=pct)
-            )
+            if ev.status != "active" or ev.direction != "outflow":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Scheduled event must be an active outflow",
+                )
+            overrides.append(ReduceOutflowOverride(scheduled_event_id=ev.id, reduction_pct=pct))
         elif req.transaction_id is not None:
+            _check_tx_target(db, business_id, req.transaction_id, ("purchase",), "purchase")
             payables = finance.get_payables(db, business_id, as_of=ref_date)
             matched = [
                 tx
@@ -130,14 +181,13 @@ def run_scenario(
             ]
             if not matched:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Target purchase payable not found in this business",
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Target purchase has no remaining unpaid balance",
                 )
             overrides.append(
                 ReduceOutflowOverride(transaction_id=matched[0].transaction_id, reduction_pct=pct)
             )
         else:
-            # Prefer an active scheduled outflow event inside the horizon, else largest open purchase
             ev = (
                 db.query(ScheduledEvent)
                 .filter(
@@ -146,13 +196,11 @@ def run_scenario(
                     ScheduledEvent.direction == "outflow",
                     ScheduledEvent.expected_on <= horizon_end,
                 )
-                .order_by(ScheduledEvent.amount.desc())
+                .order_by(ScheduledEvent.amount.desc(), ScheduledEvent.id.asc())
                 .first()
             )
             if ev is not None:
-                overrides.append(
-                    ReduceOutflowOverride(scheduled_event_id=ev.id, reduction_pct=pct)
-                )
+                overrides.append(ReduceOutflowOverride(scheduled_event_id=ev.id, reduction_pct=pct))
             else:
                 payables = finance.get_payables(db, business_id, as_of=ref_date)
                 purchases = [
@@ -162,7 +210,7 @@ def run_scenario(
                 ]
                 if not purchases:
                     raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                         detail="No planned reorder or open purchase found to reduce",
                     )
                 target_tx = max(purchases, key=lambda t: t.balance_due)
@@ -172,6 +220,7 @@ def run_scenario(
                         reduction_pct=pct,
                     )
                 )
+        assumption_note = f"Simulated: assumes planned reorder shrinks by {pct}% without causing stockouts."
 
     elif req.type == "planned_purchase":
         if req.planned_purchase_amount is None:
@@ -192,6 +241,13 @@ def run_scenario(
                 on=purchase_date,
             )
         )
+        assumption_note = (
+            f"Simulated: models a {q4(req.planned_purchase_amount)} {baseline.currency} outflow on {purchase_date}."
+        )
+        affordability_note = (
+            "Cash coverage check only within this horizon (lowest closing cash >= reserve); "
+            "does not judge whether the stock or purchase is needed."
+        )
 
     simulated = forecast.build_forecast(
         db,
@@ -209,15 +265,16 @@ def run_scenario(
         affordable = simulated.lowest_cash_amount >= simulated.min_cash_reserve
 
     impact = ScenarioImpactOut(
-        projected_cash_improvement=q4(
-            simulated.lowest_cash_amount - baseline.lowest_cash_amount
-        ),
+        cash_impact=q4(simulated.lowest_cash_amount - baseline.lowest_cash_amount),
         gap_reduction_vs_reserve=q4(
             baseline.estimated_cash_gap_vs_reserve - simulated.estimated_cash_gap_vs_reserve
         ),
-        reserve_breach_days_avoided=baseline_breach_days - sim_breach_days,
+        breach_days_change=sim_breach_days - baseline_breach_days,
         trapped_internal_capital=trapped_capital,
+        moved_beyond_horizon=moved_beyond_horizon,
         affordable_above_reserve=affordable,
+        assumption_note=assumption_note,
+        affordability_note=affordability_note,
     )
 
     return ScenarioResponse(

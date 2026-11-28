@@ -17,6 +17,7 @@ from app.schemas import (
     PartyBalanceOut,
     ProfitabilityResponse,
     ReadinessResponse,
+    RecommendationsResponse,
 )
 from app.services import finance, forecast, readiness, recommend
 from app.services.finance import ZERO, q4
@@ -124,10 +125,14 @@ def get_dashboard_endpoint(
         forecast=fc,
     )
     recs = recommend.build_recommendations(
+        db=db,
+        business_id=business_id,
         currency=currency,
         receivables=receivables,
         inventory=inventory,
-        forecast=fc,
+        coverage=coverage,
+        fc=fc,
+        as_of=ref_date,
     )
 
     return DashboardResponse(
@@ -148,6 +153,18 @@ def get_dashboard_endpoint(
         readiness_summary=readiness_summary,
         recommendations=recs,
     )
+
+
+@router.get("/recommendations", response_model=RecommendationsResponse)
+def get_recommendations_endpoint(
+    days: int = Query(default=14),
+    as_of: dt.date | None = Query(default=None),
+    business_id: uuid.UUID = Depends(get_current_business_id),
+    db: Session = Depends(get_db),
+) -> RecommendationsResponse:
+    """Return deterministic, internal-capital-first recommendations (shared with /dashboard)."""
+    horizon = _validate_alert_horizon(days)
+    return recommend.get_recommendations_bundle(db, business_id, days=horizon, as_of=as_of)
 
 
 @router.get("/parties/balances", response_model=PartiesBalanceResponse)

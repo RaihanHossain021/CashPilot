@@ -18,7 +18,7 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string; soon?: boolean }> = [
   { id: 'parties', label: 'Parties' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'advisor', label: 'Advisor' },
-  { id: 'scenarios', label: 'Scenario Lab', soon: true },
+  { id: 'scenarios', label: 'Scenario Lab' },
 ]
 
 export function AppShell({

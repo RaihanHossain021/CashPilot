@@ -9,12 +9,16 @@ import { DashboardPage } from './pages/Dashboard'
 import { InventoryPage } from './pages/Inventory'
 import { LedgerPage } from './pages/Ledger'
 import { PartiesPage } from './pages/Parties'
+import { ScenarioLabPage } from './pages/ScenarioLab'
+import type { ScenarioRequestPayload } from './types'
 
 function App() {
   const queryClient = useQueryClient()
   const [hasToken, setHasToken] = useState<boolean>(() => Boolean(getStoredToken()))
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard')
   const [showSettings, setShowSettings] = useState(false)
+  const [scenarioPrefill, setScenarioPrefill] = useState<ScenarioRequestPayload | null>(null)
+  const [scenarioLaunchKey, setScenarioLaunchKey] = useState(0)
 
   const businessQuery = useQuery({
     queryKey: ['business'],
@@ -80,19 +84,25 @@ function App() {
       onOpenSettings={() => setShowSettings(true)}
       onSignOut={handleSignOut}
     >
-      {activeTab === 'dashboard' && <DashboardPage />}
+      {activeTab === 'dashboard' && (
+        <DashboardPage
+          onOpenScenario={(sc) => {
+            setScenarioPrefill(sc)
+            setScenarioLaunchKey((k) => k + 1)
+            setActiveTab('scenarios')
+          }}
+        />
+      )}
       {activeTab === 'ledger' && <LedgerPage business={business} />}
       {activeTab === 'parties' && <PartiesPage />}
       {activeTab === 'inventory' && <InventoryPage />}
       {activeTab === 'advisor' && <AdvisorPage business={business} />}
       {activeTab === 'scenarios' && (
-        <section className="glass-panel cp-enter rounded-3xl p-8 text-center max-w-xl mx-auto mt-10">
-          <h1 className="text-xl font-semibold text-slate-900">Scenario Lab (Phase 8)</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Interactive what-if comparisons (collect dues, delay payment, reorder less, planned
-            purchase) are scheduled in Phase 8.
-          </p>
-        </section>
+        <ScenarioLabPage
+          key={scenarioLaunchKey}
+          business={business}
+          prefill={scenarioPrefill}
+        />
       )}
 
       {showSettings && (

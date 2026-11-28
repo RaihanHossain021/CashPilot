@@ -55,12 +55,12 @@ class RunScenarioInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["collect_dues", "delay_payment", "reorder_less", "planned_purchase"]
     horizon_days: Literal[7, 14, 30] = 14
-    collect_pct: Decimal | None = Field(default=None, ge=Decimal("0"), le=Decimal("100"))
-    delay_days: int | None = Field(default=None, ge=1, le=60)
+    collect_pct: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("100"))
+    delay_days: int | None = Field(default=None, ge=1, le=30)
     transaction_id: uuid.UUID | None = None
     scheduled_event_id: uuid.UUID | None = None
     reorder_reduction_pct: Decimal | None = Field(
-        default=None, ge=Decimal("0"), le=Decimal("100")
+        default=None, gt=Decimal("0"), le=Decimal("100")
     )
     planned_purchase_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
     planned_purchase_date: dt.date | None = None
@@ -346,11 +346,13 @@ def _handle_run_scenario(
         "simulated_lowest_cash": str(res.simulated.lowest_cash_amount),
         "simulated_lowest_date": res.simulated.lowest_cash_date.isoformat(),
         "simulated_gap_vs_reserve": str(res.simulated.estimated_cash_gap_vs_reserve),
-        "projected_cash_improvement": str(res.impact.projected_cash_improvement),
+        "cash_impact": str(res.impact.cash_impact),
         "gap_reduction_vs_reserve": str(res.impact.gap_reduction_vs_reserve),
-        "reserve_breach_days_avoided": res.impact.reserve_breach_days_avoided,
+        "breach_days_change": res.impact.breach_days_change,
         "trapped_internal_capital": str(res.impact.trapped_internal_capital),
+        "moved_beyond_horizon": res.impact.moved_beyond_horizon,
         "affordable_above_reserve": res.impact.affordable_above_reserve,
+        "assumption_note": res.impact.assumption_note,
         "record_ids": [
             str(c.record_id)
             for c in res.simulated.causes[:MAX_PARTIES_RETURNED]
