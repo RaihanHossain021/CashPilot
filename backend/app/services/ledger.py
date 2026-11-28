@@ -156,9 +156,11 @@ def _get_tx_settlement(
     tx: Transaction,
 ) -> tuple[Decimal, Decimal, Decimal]:
     """Return (amount_paid, returns_total, balance_due) for a single transaction."""
+    expected_kind = "refund" if tx.type in RETURN_TX_TYPES else "payment"
     net_cash = db.query(func.coalesce(func.sum(CashMovement.signed_amount), ZERO)).filter(
         CashMovement.business_id == business_id,
         CashMovement.transaction_id == tx.id,
+        CashMovement.kind == expected_kind,
     ).scalar() or ZERO
     amount_paid = _cash_to_paid(tx.type, Decimal(net_cash))
 
@@ -396,6 +398,7 @@ def _create_return_transaction(
                 InventoryMovement(
                     business_id=business_id,
                     product_id=product.id,
+                    date=payload.date,
                     qty_delta=qty_delta,
                     unit_cost=unit_cost_snapshot,
                     type="return",
@@ -409,6 +412,7 @@ def _create_return_transaction(
                 business_id=business_id,
                 date=payload.date,
                 signed_amount=_signed_payment_amount(payload.type, refund_amount),
+                kind="refund",
                 transaction_id=ret_tx.id,
                 idempotency_key=(
                     f"{payload.idempotency_key}:refund" if payload.idempotency_key else None
@@ -583,6 +587,7 @@ def _create_standard_transaction(
                     InventoryMovement(
                         business_id=business_id,
                         product_id=pid,
+                        date=payload.date,
                         qty_delta=qty_delta,
                         unit_cost=unit_cost_snapshot,
                         type=payload.type,
@@ -596,6 +601,7 @@ def _create_standard_transaction(
                 business_id=business_id,
                 date=payload.date,
                 signed_amount=_signed_payment_amount(payload.type, paid_amount),
+                kind="payment",
                 transaction_id=tx.id,
                 idempotency_key=(
                     f"{payload.idempotency_key}:initial" if payload.idempotency_key else None
@@ -683,6 +689,7 @@ def record_payment(
         business_id=business_id,
         date=payload.date,
         signed_amount=_signed_payment_amount(tx.type, amount),
+        kind="payment",
         transaction_id=tx.id,
         idempotency_key=payload.idempotency_key,
         note=payload.note or f"Payment for {tx.type}",
@@ -710,6 +717,7 @@ def set_opening_cash(
     if existing is not None:
         existing.date = payload.date
         existing.signed_amount = amount
+        existing.kind = "opening"
         existing.note = payload.note or "Opening cash"
         db.flush()
         return CashMovementOut.model_validate(existing)
@@ -718,6 +726,7 @@ def set_opening_cash(
         business_id=business_id,
         date=payload.date,
         signed_amount=amount,
+        kind="opening",
         transaction_id=None,
         idempotency_key=OPENING_CASH_IDEMPOTENCY_KEY,
         note=payload.note or "Opening cash",
@@ -754,6 +763,7 @@ def set_opening_stock(
     movement = InventoryMovement(
         business_id=business_id,
         product_id=product.id,
+        date=payload.date or dt.date.today(),
         qty_delta=qty,
         unit_cost=unit_cost,
         type="opening",
@@ -780,7 +790,24 @@ def list_transactions(
     cash_subq = (
         db.query(
             CashMovement.transaction_id.label("tx_id"),
-            func.coalesce(func.sum(CashMovement.signed_amount), ZERO).label("net_cash"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (CashMovement.kind == "payment", CashMovement.signed_amount),
+                        else_=ZERO,
+                    )
+                ),
+                ZERO,
+            ).label("net_payment_cash"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (CashMovement.kind == "refund", CashMovement.signed_amount),
+                        else_=ZERO,
+                    )
+                ),
+                ZERO,
+            ).label("net_refund_cash"),
         )
         .filter(
             CashMovement.business_id == business_id,
@@ -804,10 +831,13 @@ def list_transactions(
         .subquery()
     )
 
-    net_cash_col = func.coalesce(cash_subq.c.net_cash, ZERO)
+    pay_cash_col = func.coalesce(cash_subq.c.net_payment_cash, ZERO)
+    ref_cash_col = func.coalesce(cash_subq.c.net_refund_cash, ZERO)
     amount_paid_expr = case(
-        (Transaction.type.in_(["sale", "purchase_return"]), net_cash_col),
-        else_=-net_cash_col,
+        (Transaction.type == "sale", pay_cash_col),
+        (Transaction.type.in_(["purchase", "expense"]), -pay_cash_col),
+        (Transaction.type == "purchase_return", ref_cash_col),
+        else_=-ref_cash_col,
     )
     returns_expr = case(
         (Transaction.type.in_(RETURN_TX_TYPES), ZERO),

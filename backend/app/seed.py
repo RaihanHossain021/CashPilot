@@ -134,14 +134,14 @@ def seed_grocery_demo(db: Session, today: dt.date | None = None) -> dict[str, st
     for prod, qty, cost in [
         (rice, Decimal("80"), Decimal("450")),
         (oil, Decimal("100"), Decimal("300")),
-        (sugar, Decimal("150"), Decimal("110")),
+        (sugar, Decimal("90"), Decimal("110")),
         (olive_oil, Decimal("10"), Decimal("2000")),
         (saffron, Decimal("10"), Decimal("1500")),
     ]:
         ledger.set_opening_stock(
             db,
             business.id,
-            OpeningStockCreate(product_id=prod.id, qty=qty, unit_cost=cost),
+            OpeningStockCreate(product_id=prod.id, qty=qty, unit_cost=cost, date=opening_date),
         )
 
     # 2. Overdue credit sales before the 14-day window (total overdue = 40,000)
